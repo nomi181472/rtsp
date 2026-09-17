@@ -1,0 +1,82 @@
+# Python runtime artifacts
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+share/python-wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# Virtual environments
+venv/
+.venv/
+env/
+ENV/
+env.bak/
+venv.bak/
+
+# Environment variables & secrets
+.env
+.env.local
+.env.*.local
+*.env
+
+# MediaMTX auto-generated SSL certificates & keys
+auto.crt
+auto.key
+*.crt
+*.key
+*.pem
+
+# Pre-compiled MediaMTX binary (can be re-downloaded or built in Docker)
+bin/mediamtx
+bin/mediamtx.tar.gz
+
+# Logs & temporary runtime files
+*.log
+logs/
+*.pid
+/tmp/
+
+# HLS segments & temporary streaming dumps
+*.ts
+*.m4s
+*.m3u8
+*.mpd
+
+# Browser snapshots & test captures
+snapshot_*.png
+test_output/
+recordings/
+
+# OS specific files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# IDE & Editor files
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+.project
+.settings/

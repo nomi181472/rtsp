@@ -1,0 +1,30 @@
+services:
+  cctv-rtsp-server:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: mock-hikvision-rtsp
+    restart: unless-stopped
+    # Host networking enables direct WebRTC UDP/TCP negotiation and multi-laptop LAN access
+    network_mode: host
+    environment:
+      - RTSP_PORT=8554
+      - HLS_PORT=8888
+      - WEBRTC_PORT=8889
+      - WEB_PORT=8080
+      - API_PORT=9997
+      - LOG_LEVEL=info
+      - WEBRTC_ADDITIONAL_HOSTS=${WEBRTC_ADDITIONAL_HOSTS:-10.160.45.134,localhost,127.0.0.1}
+      - STREAMS_CONFIG_PATH=/app/config/streams.json
+      - TZ=${TZ:-Asia/Karachi}
+      - RTSP_USERNAME=${RTSP_USERNAME:-admin}
+      - RTSP_PASSWORD=${RTSP_PASSWORD:-Password123}
+    volumes:
+      # Mount configuration for live modifications
+      - ./config/streams.json:/app/config/streams.json:ro
+      # Mount local video storage directory
+      - ./videos:/app/videos
+      # Mount web dashboard
+      - ./web:/app/web:ro
+      # Synchronize host local time
+      - /etc/localtime:/etc/localtime:ro

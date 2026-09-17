@@ -1,0 +1,960 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Hikvision Mock CCTV NVR - Live Control Station</title>
+  <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>📹</text></svg>">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&family=Plus+Jakarta+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <script src="https://cdn.jsdelivr.net/npm/hls.js@latest"></script>
+  <script src="./reader.js"></script>
+  <script>
+    if (window.location.search.includes("delay=")) {
+      document.write('<img src="/api/delay" style="display:none">');
+    }
+  </script>
+  <style>
+    :root {
+      --bg-base: #0a0e17;
+      --bg-surface: #111827;
+      --bg-card: #172033;
+      --bg-card-hover: #1e293b;
+      --border-color: #2a374a;
+      --border-glow: #38bdf840;
+      --text-primary: #f8fafc;
+      --text-secondary: #94a3b8;
+      --text-muted: #64748b;
+      --accent-blue: #0284c7;
+      --accent-cyan: #06b6d4;
+      --accent-green: #10b981;
+      --accent-red: #ef4444;
+      --accent-amber: #f59e0b;
+      --font-sans: 'Plus Jakarta Sans', -apple-system, BlinkMacSystemFont, sans-serif;
+      --font-mono: 'JetBrains Mono', monospace;
+    }
+
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+
+    body {
+      background-color: var(--bg-base);
+      color: var(--text-primary);
+      font-family: var(--font-sans);
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      overflow-x: hidden;
+    }
+
+    /* Top Navigation Bar */
+    header {
+      background: linear-gradient(180deg, #111827 0%, rgba(17, 24, 39, 0.8) 100%);
+      border-bottom: 1px solid var(--border-color);
+      backdrop-filter: blur(12px);
+      padding: 12px 24px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      position: sticky;
+      top: 0;
+      z-index: 50;
+    }
+
+    .brand-section {
+      display: flex;
+      align-items: center;
+      gap: 16px;
+    }
+
+    .brand-logo {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+
+    .logo-badge {
+      background: linear-gradient(135deg, #ef4444, #b91c1c);
+      color: white;
+      font-size: 11px;
+      font-weight: 800;
+      padding: 4px 8px;
+      border-radius: 4px;
+      letter-spacing: 1px;
+    }
+
+    .brand-title {
+      font-size: 18px;
+      font-weight: 700;
+      letter-spacing: -0.3px;
+    }
+
+    .brand-title span {
+      color: var(--accent-cyan);
+    }
+
+    .system-status-pills {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+
+    .status-pill {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      background: var(--bg-card);
+      border: 1px solid var(--border-color);
+      padding: 5px 12px;
+      border-radius: 20px;
+      font-size: 12px;
+      font-family: var(--font-mono);
+    }
+
+    .live-dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background-color: var(--accent-green);
+      box-shadow: 0 0 10px var(--accent-green);
+      animation: pulse-dot 1.5s infinite;
+    }
+
+    @keyframes pulse-dot {
+      0%, 100% { opacity: 1; transform: scale(1); }
+      50% { opacity: 0.4; transform: scale(0.85); }
+    }
+
+    .header-controls {
+      display: flex;
+      align-items: center;
+      gap: 16px;
+    }
+
+    .auth-input-group {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      background: var(--bg-surface);
+      border: 1px solid var(--border-color);
+      border-radius: 8px;
+      padding: 4px 10px;
+    }
+
+    .auth-input-group label {
+      font-size: 11px;
+      font-weight: 600;
+      color: var(--text-muted);
+      text-transform: uppercase;
+    }
+
+    .auth-input-group input {
+      background: transparent;
+      border: none;
+      color: var(--text-primary);
+      font-family: var(--font-mono);
+      font-size: 12px;
+      width: 90px;
+      outline: none;
+    }
+
+    .btn-action {
+      background: linear-gradient(135deg, var(--accent-blue), #0369a1);
+      color: white;
+      border: none;
+      border-radius: 8px;
+      padding: 7px 16px;
+      font-size: 12px;
+      font-weight: 600;
+      cursor: pointer;
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      transition: all 0.2s;
+    }
+
+    .btn-action:hover {
+      filter: brightness(1.15);
+      transform: translateY(-1px);
+    }
+
+    .btn-secondary {
+      background: var(--bg-card);
+      border: 1px solid var(--border-color);
+      color: var(--text-primary);
+    }
+
+    .btn-secondary:hover {
+      background: var(--bg-card-hover);
+    }
+
+    /* Main Container */
+    main {
+      flex: 1;
+      padding: 24px;
+      display: flex;
+      flex-direction: column;
+      gap: 20px;
+      max-width: 1720px;
+      width: 100%;
+      margin: 0 auto;
+    }
+
+    /* Top Sub-Bar with Views and Info */
+    .dashboard-toolbar {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      flex-wrap: wrap;
+      gap: 12px;
+    }
+
+    .view-toggles {
+      display: flex;
+      background: var(--bg-surface);
+      border: 1px solid var(--border-color);
+      border-radius: 8px;
+      padding: 3px;
+      gap: 4px;
+    }
+
+    .view-btn {
+      background: transparent;
+      border: none;
+      color: var(--text-secondary);
+      padding: 6px 14px;
+      border-radius: 6px;
+      font-size: 12px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: all 0.2s;
+    }
+
+    .view-btn.active {
+      background: var(--accent-blue);
+      color: white;
+    }
+
+    .osd-clock-banner {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-family: var(--font-mono);
+      font-size: 13px;
+      color: #fbbf24;
+      background: rgba(0,0,0,0.5);
+      border: 1px solid rgba(251, 191, 36, 0.3);
+      padding: 6px 14px;
+      border-radius: 6px;
+    }
+
+    /* Camera Grid */
+    .camera-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(480px, 1fr));
+      gap: 20px;
+      transition: all 0.3s ease;
+    }
+
+    .camera-grid.single-view {
+      grid-template-columns: 1fr;
+    }
+
+    .camera-card {
+      background: var(--bg-card);
+      border: 1px solid var(--border-color);
+      border-radius: 12px;
+      overflow: hidden;
+      display: flex;
+      flex-direction: column;
+      box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.4);
+      transition: transform 0.2s, border-color 0.2s;
+      position: relative;
+    }
+
+    .camera-card:hover {
+      border-color: #38bdf880;
+    }
+
+    .card-header {
+      padding: 10px 16px;
+      background: rgba(17, 24, 39, 0.85);
+      border-bottom: 1px solid var(--border-color);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+
+    .camera-info {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+
+    .cam-tag {
+      background: var(--bg-base);
+      border: 1px solid var(--border-color);
+      color: var(--accent-cyan);
+      font-family: var(--font-mono);
+      font-size: 11px;
+      font-weight: 700;
+      padding: 3px 8px;
+      border-radius: 4px;
+    }
+
+    .cam-name {
+      font-size: 14px;
+      font-weight: 600;
+    }
+
+    .stream-proto-badge {
+      font-size: 11px;
+      font-family: var(--font-mono);
+      padding: 3px 8px;
+      border-radius: 4px;
+      background: rgba(16, 185, 129, 0.15);
+      color: var(--accent-green);
+      border: 1px solid rgba(16, 185, 129, 0.3);
+    }
+
+    /* Video Player Viewport */
+    .video-viewport {
+      position: relative;
+      width: 100%;
+      aspect-ratio: 16 / 9;
+      background: #000;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      overflow: hidden;
+    }
+
+    .video-viewport video {
+      width: 100%;
+      height: 100%;
+      object-fit: contain;
+      background: #000;
+    }
+
+    /* Video Overlays */
+    .osd-overlay {
+      position: absolute;
+      top: 10px;
+      left: 12px;
+      right: 12px;
+      display: flex;
+      justify-content: space-between;
+      pointer-events: none;
+      font-family: var(--font-mono);
+      font-size: 12px;
+      text-shadow: 1px 1px 3px black, -1px -1px 3px black;
+      z-index: 10;
+    }
+
+    .osd-cam-title {
+      color: #fff;
+      background: rgba(0,0,0,0.4);
+      padding: 2px 6px;
+      border-radius: 3px;
+    }
+
+    .osd-timestamp {
+      color: #fbbf24;
+      background: rgba(0,0,0,0.4);
+      padding: 2px 6px;
+      border-radius: 3px;
+    }
+
+    .live-rec-badge {
+      position: absolute;
+      top: 10px;
+      left: 50%;
+      transform: translateX(-50%);
+      display: flex;
+      align-items: center;
+      gap: 5px;
+      background: rgba(239, 68, 68, 0.85);
+      color: white;
+      font-size: 10px;
+      font-weight: 800;
+      padding: 2px 8px;
+      border-radius: 3px;
+      letter-spacing: 0.5px;
+      pointer-events: none;
+      z-index: 10;
+    }
+
+    .loader-overlay {
+      position: absolute;
+      inset: 0;
+      background: rgba(10, 14, 23, 0.85);
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 12px;
+      z-index: 20;
+      transition: opacity 0.3s;
+    }
+
+    .loader-overlay.hidden {
+      opacity: 0;
+      pointer-events: none;
+    }
+
+    .spinner {
+      width: 36px;
+      height: 36px;
+      border: 3px solid var(--border-color);
+      border-top-color: var(--accent-cyan);
+      border-radius: 50%;
+      animation: spin 0.8s linear infinite;
+    }
+
+    @keyframes spin {
+      to { transform: rotate(360deg); }
+    }
+
+    .loader-text {
+      font-size: 12px;
+      color: var(--text-secondary);
+      font-family: var(--font-mono);
+    }
+
+    /* Video Controls Bar */
+    .card-actions {
+      padding: 10px 16px;
+      background: var(--bg-surface);
+      border-top: 1px solid var(--border-color);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+    }
+
+    .btn-icon {
+      background: var(--bg-card);
+      border: 1px solid var(--border-color);
+      color: var(--text-secondary);
+      width: 32px;
+      height: 32px;
+      border-radius: 6px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      cursor: pointer;
+      transition: all 0.2s;
+    }
+
+    .btn-icon:hover {
+      color: var(--text-primary);
+      border-color: var(--accent-cyan);
+      background: var(--bg-card-hover);
+    }
+
+    .protocol-selector {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+
+    .proto-btn {
+      background: var(--bg-card);
+      border: 1px solid var(--border-color);
+      color: var(--text-muted);
+      font-size: 11px;
+      font-family: var(--font-mono);
+      padding: 4px 8px;
+      border-radius: 4px;
+      cursor: pointer;
+      transition: all 0.2s;
+    }
+
+    .proto-btn.active {
+      background: var(--accent-blue);
+      color: white;
+      border-color: var(--accent-blue);
+    }
+
+    /* Collapsible RTSP URLs Panel */
+    .rtsp-drawer {
+      padding: 12px 16px;
+      background: #0f1522;
+      border-top: 1px solid var(--border-color);
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+
+    .url-row {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-family: var(--font-mono);
+      font-size: 11px;
+    }
+
+    .url-label {
+      color: var(--text-muted);
+      width: 85px;
+      flex-shrink: 0;
+    }
+
+    .url-value {
+      background: var(--bg-surface);
+      border: 1px solid var(--border-color);
+      padding: 4px 8px;
+      border-radius: 4px;
+      color: #38bdf8;
+      flex: 1;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .btn-copy {
+      background: var(--bg-card);
+      border: 1px solid var(--border-color);
+      color: var(--text-secondary);
+      font-size: 10px;
+      font-family: var(--font-sans);
+      font-weight: 600;
+      padding: 4px 10px;
+      border-radius: 4px;
+      cursor: pointer;
+      flex-shrink: 0;
+      transition: all 0.2s;
+    }
+
+    .btn-copy:hover {
+      color: white;
+      background: var(--accent-blue);
+    }
+
+    .btn-copy.copied {
+      background: var(--accent-green);
+      color: white;
+      border-color: var(--accent-green);
+    }
+
+    /* Toast Notification */
+    #toast {
+      position: fixed;
+      bottom: 24px;
+      right: 24px;
+      background: rgba(16, 185, 129, 0.95);
+      color: white;
+      font-size: 13px;
+      font-weight: 600;
+      padding: 10px 18px;
+      border-radius: 8px;
+      box-shadow: 0 10px 25px rgba(0,0,0,0.5);
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      z-index: 1000;
+      opacity: 0;
+      transform: translateY(20px);
+      transition: all 0.3s ease;
+      pointer-events: none;
+    }
+
+    #toast.show {
+      opacity: 1;
+      transform: translateY(0);
+    }
+  </style>
+</head>
+<body>
+
+  <!-- Top Header -->
+  <header>
+    <div class="brand-section">
+      <div class="brand-logo">
+        <span class="logo-badge">HIKVISION</span>
+        <h1 class="brand-title">Mock CCTV <span>Station</span></h1>
+      </div>
+      <div class="system-status-pills">
+        <div class="status-pill">
+          <span class="live-dot"></span>
+          <span>NVR ONLINE</span>
+        </div>
+        <div class="status-pill">
+          <span style="color: var(--accent-cyan);">MediaMTX v1.21</span>
+        </div>
+      </div>
+    </div>
+
+    <div class="header-controls">
+      <div class="auth-input-group">
+        <label>User</label>
+        <input type="text" id="global-user" value="admin">
+        <label>Pass</label>
+        <input type="password" id="global-pass" value="Password123">
+      </div>
+      <button class="btn-action" id="reload-all-btn">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M23 4v6h-6M1 20v-6h6M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>
+        Reconnect All
+      </button>
+    </div>
+  </header>
+
+  <!-- Main Viewport -->
+  <main>
+    <div class="dashboard-toolbar">
+      <div class="view-toggles">
+        <button class="view-btn active" id="view-grid-btn">Multi-Camera Grid</button>
+        <button class="view-btn" id="view-single-btn">Single Focus</button>
+      </div>
+      <div class="osd-clock-banner">
+        <span>STATION CLOCK:</span>
+        <span id="live-master-clock">--:--:--</span>
+      </div>
+    </div>
+
+    <!-- Camera Cards Container -->
+    <div class="camera-grid" id="camera-grid">
+      <!-- Injected by JavaScript -->
+    </div>
+  </main>
+
+  <!-- Notification Toast -->
+  <div id="toast">Copied to clipboard!</div>
+
+  <script>
+    // System Channel Definitions matching streams.json
+    const CHANNELS = [
+      {
+        id: "101",
+        name: "Front Entrance Camera",
+        type: "Local Video Loop",
+        res: "1080p",
+        fps: "25 FPS",
+        hikPath: "Streaming/Channels/101",
+        legacyPath: "ch1/main/av_stream"
+      },
+      {
+        id: "202",
+        name: "Loading Bay / CDN Stream",
+        type: "Remote Cloud / CDN URL",
+        res: "720p",
+        fps: "24 FPS",
+        hikPath: "Streaming/Channels/202",
+        legacyPath: "ch2/main/av_stream"
+      },
+      {
+        id: "303",
+        name: "Office Lobby Camera",
+        type: "Local Video Loop",
+        res: "1080p",
+        fps: "25 FPS",
+        hikPath: "Streaming/Channels/303",
+        legacyPath: "ch3/main/av_stream"
+      }
+    ];
+
+    const host = window.location.hostname || "localhost";
+    const rtspPort = 8554;
+    const webrtcPort = 8889;
+    const hlsPort = 8888;
+
+    // Active peer connections and HLS instances
+    const activeStreams = {};
+
+    function showToast(msg) {
+      const toast = document.getElementById("toast");
+      toast.textContent = msg;
+      toast.classList.add("show");
+      setTimeout(() => toast.classList.remove("show"), 2500);
+    }
+
+    function copyText(text, btnElement) {
+      navigator.clipboard.writeText(text).then(() => {
+        const orig = btnElement.textContent;
+        btnElement.textContent = "COPIED!";
+        btnElement.classList.add("copied");
+        showToast(`Copied: ${text}`);
+        setTimeout(() => {
+          btnElement.textContent = orig;
+          btnElement.classList.remove("copied");
+        }, 1800);
+      });
+    }
+
+    // Master Clock Updater
+    function updateClock() {
+      const now = new Date();
+      const str = now.toISOString().replace("T", " ").substring(0, 19);
+      document.getElementById("live-master-clock").textContent = str;
+    }
+    setInterval(updateClock, 1000);
+    updateClock();
+
+    // WebRTC / WHEP Player with Official MediaMTX Engine
+    function startWebRTC(chId, videoEl, loaderEl, statusEl) {
+      const user = document.getElementById("global-user").value.trim();
+      const pass = document.getElementById("global-pass").value.trim();
+
+      loaderEl.classList.remove("hidden");
+      loaderEl.querySelector(".loader-text").textContent = "Connecting WebRTC (WHEP)...";
+
+      if (activeStreams[chId]?.fallbackTimer) {
+        clearTimeout(activeStreams[chId].fallbackTimer);
+      }
+      if (activeStreams[chId]?.reader) {
+        try { activeStreams[chId].reader.close(); } catch(e) {}
+      }
+      if (activeStreams[chId]?.hls) {
+        try { activeStreams[chId].hls.destroy(); } catch(e) {}
+      }
+
+      let connected = false;
+
+      // Graceful fallback to HLS if WebRTC ICE cannot traverse network
+      const fallbackTimer = setTimeout(() => {
+        if (!connected) {
+          console.warn(`[CAM ${chId}] WebRTC ICE took too long, switching to HLS...`);
+          if (activeStreams[chId]?.reader) {
+            try { activeStreams[chId].reader.close(); } catch(e) {}
+          }
+          startHLS(chId, videoEl, loaderEl, statusEl);
+        }
+      }, 6000);
+
+      try {
+        if (typeof MediaMTXWebRTCReader !== "undefined") {
+          const reader = new MediaMTXWebRTCReader({
+            url: `http://${host}:${webrtcPort}/${chId}/whep`,
+            user: user,
+            pass: pass,
+            onError: (err) => {
+              console.warn(`[CAM ${chId}] WebRTC Reader error:`, err);
+              loaderEl.querySelector(".loader-text").textContent = `WebRTC: ${err}`;
+            },
+            onTrack: (evt) => {
+              connected = true;
+              clearTimeout(fallbackTimer);
+              loaderEl.classList.add("hidden");
+              videoEl.srcObject = evt.streams[0];
+              statusEl.textContent = "WEBRTC LIVE";
+              statusEl.style.color = "var(--accent-green)";
+            }
+          });
+          activeStreams[chId] = { reader, proto: "webrtc", fallbackTimer };
+        } else {
+          startHLS(chId, videoEl, loaderEl, statusEl);
+        }
+      } catch (err) {
+        clearTimeout(fallbackTimer);
+        console.warn(`[CAM ${chId}] Failed to initialize WebRTC reader:`, err);
+        startHLS(chId, videoEl, loaderEl, statusEl);
+      }
+    }
+
+    // HLS Stream Player
+    function startHLS(chId, videoEl, loaderEl, statusEl) {
+      const user = document.getElementById("global-user").value.trim();
+      const pass = document.getElementById("global-pass").value.trim();
+
+      if (activeStreams[chId]?.fallbackTimer) {
+        clearTimeout(activeStreams[chId].fallbackTimer);
+      }
+      if (activeStreams[chId]?.reader) {
+        try { activeStreams[chId].reader.close(); } catch(e) {}
+      }
+      if (activeStreams[chId]?.hls) {
+        try { activeStreams[chId].hls.destroy(); } catch(e) {}
+      }
+
+      loaderEl.classList.remove("hidden");
+      loaderEl.querySelector(".loader-text").textContent = "Connecting HLS Stream...";
+
+      const hlsUrl = `http://${host}:${hlsPort}/${chId}/index.m3u8`;
+
+      if (Hls.isSupported()) {
+        const hls = new Hls({
+          liveSyncDurationCount: 1,
+          maxLiveSyncPlaybackRate: 1.5,
+          xhrSetup: (xhr) => {
+            xhr.setRequestHeader("Authorization", "Basic " + btoa(`${user}:${pass}`));
+          }
+        });
+        activeStreams[chId] = { hls, proto: "hls" };
+
+        hls.loadSource(hlsUrl);
+        hls.attachMedia(videoEl);
+
+        hls.on(Hls.Events.MANIFEST_PARSED, () => {
+          loaderEl.classList.add("hidden");
+          statusEl.textContent = "HLS LIVE";
+          statusEl.style.color = "var(--accent-cyan)";
+          videoEl.play().catch(() => {});
+        });
+
+        hls.on(Hls.Events.ERROR, (event, data) => {
+          if (data.fatal) {
+            loaderEl.querySelector(".loader-text").textContent = `HLS: ${data.details}. Retrying...`;
+            setTimeout(() => hls.startLoad(), 2000);
+          }
+        });
+      } else if (videoEl.canPlayType("application/vnd.apple.mpegurl")) {
+        videoEl.src = hlsUrl;
+        videoEl.addEventListener("loadedmetadata", () => {
+          loaderEl.classList.add("hidden");
+          videoEl.play().catch(() => {});
+        });
+      }
+    }
+
+    // Render Camera Cards
+    function renderGrid() {
+      const grid = document.getElementById("camera-grid");
+      grid.innerHTML = "";
+
+      const user = document.getElementById("global-user").value.trim();
+      const pass = document.getElementById("global-pass").value.trim();
+      const userPrefix = (user && pass) ? `${user}:${pass}@` : "";
+
+      CHANNELS.forEach((ch) => {
+        const card = document.createElement("div");
+        card.className = "camera-card";
+        card.id = `card-${ch.id}`;
+
+        const directRtsp = `rtsp://${userPrefix}${host}:${rtspPort}/${ch.id}`;
+        const hikRtsp = `rtsp://${userPrefix}${host}:${rtspPort}/${ch.hikPath}`;
+        const legacyRtsp = `rtsp://${userPrefix}${host}:${rtspPort}/${ch.legacyPath}`;
+        const webrtcWebUrl = `http://${host}:${webrtcPort}/${ch.id}/`;
+
+        card.innerHTML = `
+          <div class="card-header">
+            <div class="camera-info">
+              <span class="cam-tag">CH-${ch.id}</span>
+              <span class="cam-name">${ch.name}</span>
+            </div>
+            <div class="stream-proto-badge" id="proto-badge-${ch.id}">WEBRTC CONNECTING</div>
+          </div>
+
+          <div class="video-viewport">
+            <div class="osd-overlay">
+              <span class="osd-cam-title">[HIKVISION] ${ch.name}</span>
+              <span class="osd-timestamp" id="osd-time-${ch.id}">LIVE</span>
+            </div>
+            <div class="live-rec-badge">● REC</div>
+            <div class="loader-overlay" id="loader-${ch.id}">
+              <div class="spinner"></div>
+              <div class="loader-text">Initializing Stream Engine...</div>
+            </div>
+            <video id="video-${ch.id}" autoplay muted playsinline controls></video>
+          </div>
+
+          <div class="card-actions">
+            <div class="protocol-selector">
+              <button class="proto-btn active" id="btn-proto-webrtc-${ch.id}">WebRTC (Sub-Sec)</button>
+              <button class="proto-btn" id="btn-proto-hls-${ch.id}">HLS</button>
+            </div>
+            <div style="display: flex; gap: 6px;">
+              <button class="btn-icon" title="Snapshot Frame" id="btn-snap-${ch.id}">
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/><circle cx="12" cy="13" r="4"/></svg>
+              </button>
+              <button class="btn-icon" title="Open Native Web Player" onclick="window.open('${webrtcWebUrl}', '_blank')">
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6M15 3h6v6M10 14L21 3"/></svg>
+              </button>
+              <button class="btn-icon" title="Toggle Fullscreen" id="btn-fs-${ch.id}">
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M8 3H5a2 2 0 0 0-2 2v3m18 0V5a2 2 0 0 0-2-2h-3m0 18h3a2 2 0 0 0 2-2v-3M3 16v3a2 2 0 0 0 2 2h3"/></svg>
+              </button>
+            </div>
+          </div>
+
+          <div class="rtsp-drawer">
+            <div class="url-row">
+              <span class="url-label">Direct RTSP:</span>
+              <span class="url-value">${directRtsp}</span>
+              <button class="btn-copy" onclick="copyText('${directRtsp}', this)">COPY</button>
+            </div>
+            <div class="url-row">
+              <span class="url-label">Hikvision:</span>
+              <span class="url-value">${hikRtsp}</span>
+              <button class="btn-copy" onclick="copyText('${hikRtsp}', this)">COPY</button>
+            </div>
+            <div class="url-row">
+              <span class="url-label">Legacy Hik:</span>
+              <span class="url-value">${legacyRtsp}</span>
+              <button class="btn-copy" onclick="copyText('${legacyRtsp}', this)">COPY</button>
+            </div>
+          </div>
+        `;
+
+        grid.appendChild(card);
+
+        // Bind Controls
+        const videoEl = card.querySelector(`#video-${ch.id}`);
+        const loaderEl = card.querySelector(`#loader-${ch.id}`);
+        const badgeEl = card.querySelector(`#proto-badge-${ch.id}`);
+        const btnWebRTC = card.querySelector(`#btn-proto-webrtc-${ch.id}`);
+        const btnHLS = card.querySelector(`#btn-proto-hls-${ch.id}`);
+
+        btnWebRTC.addEventListener("click", () => {
+          btnWebRTC.classList.add("active");
+          btnHLS.classList.remove("active");
+          startWebRTC(ch.id, videoEl, loaderEl, badgeEl);
+        });
+
+        btnHLS.addEventListener("click", () => {
+          btnHLS.classList.add("active");
+          btnWebRTC.classList.remove("active");
+          startHLS(ch.id, videoEl, loaderEl, badgeEl);
+        });
+
+        card.querySelector(`#btn-fs-${ch.id}`).addEventListener("click", () => {
+          if (!document.fullscreenElement) {
+            videoEl.requestFullscreen().catch(err => alert(err.message));
+          } else {
+            document.exitFullscreen();
+          }
+        });
+
+        card.querySelector(`#btn-snap-${ch.id}`).addEventListener("click", () => {
+          const canvas = document.createElement("canvas");
+          canvas.width = videoEl.videoWidth || 1280;
+          canvas.height = videoEl.videoHeight || 720;
+          const ctx = canvas.getContext("2d");
+          ctx.drawImage(videoEl, 0, 0, canvas.width, canvas.height);
+          const link = document.createElement("a");
+          link.download = `snapshot_cam_${ch.id}_${Date.now()}.png`;
+          link.href = canvas.toDataURL("image/png");
+          link.click();
+          showToast(`Snapshot captured for Camera ${ch.id}`);
+        });
+
+        // Start WebRTC by default
+        startWebRTC(ch.id, videoEl, loaderEl, badgeEl);
+      });
+    }
+
+    // View toggles
+    document.getElementById("view-grid-btn").addEventListener("click", function() {
+      this.classList.add("active");
+      document.getElementById("view-single-btn").classList.remove("active");
+      document.getElementById("camera-grid").classList.remove("single-view");
+    });
+
+    document.getElementById("view-single-btn").addEventListener("click", function() {
+      this.classList.add("active");
+      document.getElementById("view-grid-btn").classList.remove("active");
+      document.getElementById("camera-grid").classList.add("single-view");
+    });
+
+    document.getElementById("reload-all-btn").addEventListener("click", () => {
+      renderGrid();
+      showToast("Reconnected all camera streams");
+    });
+
+    // Boot
+    window.addEventListener("DOMContentLoaded", renderGrid);
+  </script>
+</body>
+</html>

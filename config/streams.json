@@ -1,0 +1,32 @@
+{
+  "server": {
+    "rtsp_port": 8554,
+    "hls_port": 8888,
+    "webrtc_port": 8889,
+    "api_port": 9997,
+    "log_level": "info",
+    "live_timestamp": true,
+    "username": "admin",
+    "password": "Password123"
+  },
+  "channels": [
+    {
+      "id": "101",
+      "name": "Front Entrance Camera",
+      "source": "./videos/cam101.mp4",
+      "description": "Local mock CCTV video looped indefinitely"
+    },
+    {
+      "id": "202",
+      "name": "Loading Bay / CDN Stream",
+      "source": "https://media.w3.org/2010/05/sintel/trailer.mp4",
+      "description": "Remote CDN / Cloud Object Storage video URL"
+    },
+    {
+      "id": "303",
+      "name": "Office Lobby Camera",
+      "source": "./videos/cam303.mp4",
+      "description": "Secondary local CCTV camera stream"
+    }
+  ]
+}
