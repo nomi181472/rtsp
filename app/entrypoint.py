@@ -7,33 +7,73 @@ hosts the multi-view CCTV web station, and runs the RTSP / WebRTC server.
 
 import json
 import os
+import shutil
 import signal
 import socket
 import subprocess
 import sys
+import tempfile
 import threading
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from typing import Any, Dict, List, Tuple
+from typing import Any, Dict, List, Optional, Tuple
+
+IS_WINDOWS = os.name == "nt"
 
 
 def find_mediamtx_binary() -> str:
     """Locate the mediamtx binary in PATH, local bin/, or /usr/local/bin."""
+    bin_dir = Path(__file__).resolve().parent.parent / "bin"
+    exe_name = "mediamtx.exe" if IS_WINDOWS else "mediamtx"
+
     candidates = [
         os.environ.get("MEDIAMTX_PATH"),
-        str(Path(__file__).resolve().parent.parent / "bin" / "mediamtx"),
+        str(bin_dir / exe_name),
+        str(bin_dir / "mediamtx"),
         "/usr/local/bin/mediamtx",
         "/app/bin/mediamtx",
+        exe_name,
         "mediamtx",
     ]
     for c in candidates:
-        if c and os.path.isfile(c) and os.access(c, os.X_OK):
-            return c
-        if c:
-            found = subprocess.run(["which", c], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
-            if found.returncode == 0:
-                return found.stdout.strip()
+        if not c:
+            continue
+        if os.path.isfile(c) and (IS_WINDOWS or os.access(c, os.X_OK)):
+            return str(Path(c).resolve())
+        found = shutil.which(c)
+        if found:
+            return str(Path(found).resolve())
     raise FileNotFoundError("Could not find executable 'mediamtx' binary.")
+
+
+def find_font_file() -> Optional[str]:
+    """Return an absolute path to a usable TrueType font for ffmpeg drawtext."""
+    if IS_WINDOWS:
+        candidates = [
+            os.environ.get("WINDIR", "C:\\Windows") + r"\Fonts\arial.ttf",
+            os.environ.get("WINDIR", "C:\\Windows") + r"\Fonts\segoeui.ttf",
+            os.environ.get("WINDIR", "C:\\Windows") + r"\Fonts\consola.ttf",
+        ]
+    else:
+        candidates = [
+            "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+            "/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf",
+            "/usr/share/fonts/dejavu/DejaVuSans.ttf",
+            "/usr/share/fonts/TTF/DejaVuSans.ttf",
+        ]
+    for c in candidates:
+        if c and os.path.isfile(c):
+            return c
+    return None
+
+
+def render_fontfile_option() -> str:
+    """Build a fontfile= filter option for the platform, forward-slashed for ffmpeg."""
+    font_file = find_font_file()
+    if not font_file:
+        return ""
+    # Forward slashes avoid filtergraph escaping issues with Windows drive colons.
+    return f"fontfile={font_file.replace(os.sep, '/')}:"
 
 
 def get_additional_hosts() -> List[str]:
@@ -200,6 +240,8 @@ def resolve_source(source: str, base_dir: Path) -> Tuple[str, str]:
         else:
             print(f"[WARN] Local video file not found yet: {p}. Attempting sample generation...")
             try:
+                if str(base_dir) not in sys.path:
+                    sys.path.insert(0, str(base_dir))
                 from app.generate_sample_videos import generate_cctv_video
                 generate_cctv_video(p, camera_name=f"CAM-{p.stem}", channel_id=p.stem, duration=10)
             except Exception as e:
@@ -323,10 +365,11 @@ def build_mediamtx_yaml(server_opts: Dict[str, Any], channels: List[Dict[str, An
 
         if use_timestamp:
             safe_name = ch_name.replace("'", "")
+            font_opt = render_fontfile_option()
             filter_str = (
                 f"drawbox=y=0:h=46:color=black@0.5:t=fill,"
-                f"drawtext=text='[HIKVISION] {safe_name} (CH-{ch_id})':x=20:y=12:fontsize=22:fontcolor=white:shadowcolor=black:shadowx=2:shadowy=2,"
-                f"drawtext=text='%{{localtime\\:%Y-%m-%d %T}}':x=w-tw-20:y=12:fontsize=22:fontcolor=yellow:shadowcolor=black:shadowx=2:shadowy=2"
+                f"drawtext={font_opt}text='[HIKVISION] {safe_name} (CH-{ch_id})':x=20:y=12:fontsize=22:fontcolor=white:shadowcolor=black:shadowx=2:shadowy=2,"
+                f"drawtext={font_opt}text='%{{localtime\\:%Y-%m-%d %T}}':x=w-tw-20:y=12:fontsize=22:fontcolor=yellow:shadowcolor=black:shadowx=2:shadowy=2"
             )
             # Use libopus audio codec so WebRTC browsers (Chrome/Firefox/Safari) can play audio without dropping track
             ffmpeg_cmd = (
@@ -434,7 +477,7 @@ def main():
     print(f"[INIT] Using MediaMTX binary: {mediamtx_bin}")
 
     config_yaml_content, report = build_mediamtx_yaml(server_opts, channels, base_dir)
-    config_yaml_path = Path("/tmp/mediamtx.yml")
+    config_yaml_path = Path(tempfile.gettempdir()) / "mediamtx.yml"
     config_yaml_path.write_text(config_yaml_content, encoding="utf-8")
 
     # Start CCTV Web Dashboard server on web_port
@@ -446,7 +489,30 @@ def main():
     print_banner(server_opts, report)
 
     # Launch MediaMTX
-    process = subprocess.Popen([mediamtx_bin, str(config_yaml_path)])
+    popen_kwargs = {}
+    if IS_WINDOWS:
+        popen_kwargs["creationflags"] = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+    process = subprocess.Popen([mediamtx_bin, str(config_yaml_path)], **popen_kwargs)
+
+    def terminate_process(proc: subprocess.Popen) -> None:
+        try:
+            proc.terminate()
+            proc.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            proc.kill()
+            proc.wait(timeout=5)
+        except Exception:
+            pass
+        finally:
+            # On Windows TerminateProcess does not kill child processes (e.g. ffmpeg).
+            if IS_WINDOWS and proc.poll() is None:
+                try:
+                    subprocess.run(
+                        ["taskkill", "/PID", str(proc.pid), "/T", "/F"],
+                        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                    )
+                except Exception:
+                    pass
 
     def handle_signal(sig, frame):
         print(f"\n[SHUTDOWN] Received signal {sig}. Stopping CCTV RTSP Server...")
@@ -455,15 +521,12 @@ def main():
                 httpd.shutdown()
             except Exception:
                 pass
-        process.terminate()
-        try:
-            process.wait(timeout=5)
-        except subprocess.TimeoutExpired:
-            process.kill()
+        terminate_process(process)
         sys.exit(0)
 
     signal.signal(signal.SIGINT, handle_signal)
-    signal.signal(signal.SIGTERM, handle_signal)
+    if hasattr(signal, "SIGTERM"):
+        signal.signal(signal.SIGTERM, handle_signal)
 
     rc = process.wait()
     if httpd:

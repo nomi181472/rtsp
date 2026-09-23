@@ -85,7 +85,7 @@ This project gives you an **instant, zero-hardware mock surveillance network**:
 ## 🚀 Quickstart
 
 ### Prerequisites
-- [Docker](https://docs.docker.com/get-docker/) & Docker Compose **OR** [Podman](https://podman.io/) (Rootless supported)
+- [Docker](https://docs.docker.com/get-docker/) & Docker Compose **OR** [Podman](https://podman.io/) (Rootless supported) **OR** run natively (see [Native Run](#native-run-windows--linux)) with [FFmpeg](https://ffmpeg.org/download.html) and the [MediaMTX](https://github.com/bluenviron/mediamtx/releases) binary installed.
 
 ### 1. Clone Repository
 ```bash
@@ -93,11 +93,11 @@ git clone https://github.com/your-username/hikvision-mock-cctv.git
 cd hikvision-mock-cctv
 ```
 
-### 2. Start the CCTV Network
+### 2. Start the CCTV Network (Docker / Podman)
 ```bash
 docker compose up -d
 ```
-*(If using Podman, `docker compose up -d` or `podman-compose up -d` works seamlessly).*
+*(If using Podman, `docker compose up -d` or `podman-compose up -d` works seamlessly. Docker Desktop on Windows/macOS is also supported — the compose file no longer requires the `/etc/localtime` Linux-only bind mount.)*
 
 ### 3. Open Web Dashboard
 Navigate to:
@@ -113,6 +113,47 @@ python3 test_client.py
 ```bash
 docker compose down
 ```
+
+---
+
+## 🖥️ Native Run (Windows & Linux)
+
+No Docker required. Runs directly on **both** operating systems.
+
+### Prerequisites
+1. **Python 3.9+** on your `PATH`.
+2. **FFmpeg** (with `libx264` and `libopus`) on your `PATH` — verify with `ffmpeg -version`.
+3. **MediaMTX binary** placed in the repository `bin/` folder:
+   - **Linux**: `bin/mediamtx`
+   - **Windows**: `bin/mediamtx.exe`
+   
+   *(Download from the [MediaMTX releases](https://github.com/bluenviron/mediamtx/releases) page. Alternatively, leave the binary out of `bin/` and add `mediamtx` to your system `PATH`, or set the `MEDIAMTX_PATH` environment variable.)*
+
+### Start the server
+
+**Linux / macOS / WSL:**
+```bash
+python3 app/entrypoint.py
+```
+
+**Windows (PowerShell or CMD):**
+```powershell
+python app\entrypoint.py
+```
+
+### Open the dashboard
+👉 **[http://localhost:8080/](http://localhost:8080/)**
+
+### Verify RTSP health
+```bash
+# Linux / macOS
+python3 test_client.py
+
+# Windows
+python test_client.py
+```
+
+> **About fonts:** The server burns a live OSD timestamp into the stream via FFmpeg's `drawtext`. On Windows, FFmpeg cannot always find fonts through fontconfig, so the code automatically auto-detects `arial.ttf`/`segoeui.ttf` in `C:\Windows\Fonts\` (Linux/macOS auto-detects DejaVu/Liberation fonts) and passes an explicit `fontfile=` so the text overlay works out of the box on both OSes.
 
 ---
 
@@ -338,6 +379,7 @@ Expected output:
 ├── app/
 │   ├── entrypoint.py           # Orchestrator: parses config, launches MediaMTX & Dashboard
 │   └── generate_sample_videos.py # Utility to generate synthetic CCTV footage
+├── bin/                        # Local MediaMTX binary (mediamtx on Linux, mediamtx.exe on Windows)
 ├── config/
 │   └── streams.json            # Dynamic camera channel definitions
 ├── docs/

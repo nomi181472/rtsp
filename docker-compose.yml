@@ -1,5 +1,6 @@
 services:
   cctv-rtsp-server:
+    image: botonetics/rtsp
     build:
       context: .
       dockerfile: Dockerfile
@@ -26,5 +27,3 @@ services:
       - ./videos:/app/videos
       # Mount web dashboard
       - ./web:/app/web:ro
-      # Synchronize host local time
-      - /etc/localtime:/etc/localtime:ro

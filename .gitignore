@@ -44,6 +44,7 @@ auto.key
 
 # Pre-compiled MediaMTX binary (can be re-downloaded or built in Docker)
 bin/mediamtx
+bin/mediamtx.exe
 bin/mediamtx.tar.gz
 
 # Logs & temporary runtime files

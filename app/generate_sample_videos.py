@@ -10,6 +10,29 @@ import sys
 from pathlib import Path
 
 
+def find_font_file() -> list:
+    """Return usable TrueType fonts for ffmpeg drawtext on the current OS."""
+    if os.name == "nt":
+        windir = os.environ.get("WINDIR", "C:\\Windows")
+        candidates = [
+            windir + r"\Fonts\arial.ttf",
+            windir + r"\Fonts\segoeui.ttf",
+            windir + r"\Fonts\consola.ttf",
+        ]
+    else:
+        candidates = [
+            "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+            "/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf",
+            "/usr/share/fonts/dejavu/DejaVuSans.ttf",
+            "/usr/share/fonts/TTF/DejaVuSans.ttf",
+        ]
+    existing = []
+    for c in candidates:
+        if c and os.path.isfile(c):
+            existing.append(c.replace(os.sep, "/"))
+    return existing
+
+
 def generate_cctv_video(
     output_path: Path,
     camera_name: str,
@@ -26,6 +49,9 @@ def generate_cctv_video(
 
     print(f"[GEN] Generating mock CCTV video: {output_path} ({camera_name})...")
 
+    font_candidates = find_font_file()
+    font_opt = f"fontfile={font_candidates[0]}:" if font_candidates else ""
+
     # Clean mock CCTV surveillance scene:
     # 1. Base video: smptebars with security camera grid & noise
     # 2. Bottom status bar with camera model info
@@ -33,7 +59,7 @@ def generate_cctv_video(
         f"smptebars=size={width}x{height}:rate={fps},"
         f"drawgrid=width=100:height=100:thickness=1:color=white@0.08,"
         f"drawbox=y={height-36}:h=36:color=black@0.7:t=fill,"
-        f"drawtext=text='HIKVISION SURVEILLANCE NETWORK | 1080p Stream':x=20:y={height-26}:fontsize=16:fontcolor=lightgrey"
+        f"drawtext={font_opt}text='HIKVISION SURVEILLANCE NETWORK | 1080p Stream':x=20:y={height-26}:fontsize=16:fontcolor=lightgrey"
     )
 
     cmd = [
