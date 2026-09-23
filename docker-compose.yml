@@ -8,19 +8,21 @@ services:
     restart: unless-stopped
 
     # Explicit port mappings work on BOTH Windows (Docker Desktop) and Linux.
+    # Bound to 0.0.0.0 so they are reachable from any interface, including
+    # other devices on your LAN (mobile, other PCs).
     # Keep network_mode: host commented out on Windows — Docker Desktop does
     # not support it reliably. Uncomment it on Linux only if you prefer host
     # networking over published ports (then remove the ports: block below).
     ports:
-      - "${RTSP_PORT:-8554}:${RTSP_PORT:-8554}"          # RTSP
-      - "${HLS_PORT:-8888}:${HLS_PORT:-8888}"            # HLS
-      - "${WEBRTC_PORT:-8889}:${WEBRTC_PORT:-8889}"      # WebRTC signaling
-      - "${WEB_PORT:-8080}:${WEB_PORT:-8080}"            # Web dashboard
-      - "${API_PORT:-9997}:${API_PORT:-9997}"            # MediaMTX REST API
-      - "8000:8000/udp"                                  # RTP media
-      - "8001:8001/udp"                                  # RTCP control
-      - "8189:8189/udp"                                  # WebRTC ICE (UDP)
-      - "8189:8189"                                      # WebRTC ICE (TCP)
+      - "0.0.0.0:${RTSP_PORT:-8554}:${RTSP_PORT:-8554}"          # RTSP
+      - "0.0.0.0:${HLS_PORT:-8888}:${HLS_PORT:-8888}"            # HLS
+      - "0.0.0.0:${WEBRTC_PORT:-8889}:${WEBRTC_PORT:-8889}"      # WebRTC signaling
+      - "0.0.0.0:${WEB_PORT:-8080}:${WEB_PORT:-8080}"            # Web dashboard
+      - "0.0.0.0:${API_PORT:-9997}:${API_PORT:-9997}"            # MediaMTX REST API
+      - "0.0.0.0:8000:8000/udp"                                  # RTP media
+      - "0.0.0.0:8001:8001/udp"                                  # RTCP control
+      - "0.0.0.0:8189:8189/udp"                                  # WebRTC ICE (UDP)
+      - "0.0.0.0:8189:8189"                                      # WebRTC ICE (TCP)
     # network_mode: host
 
     environment:
@@ -32,7 +34,10 @@ services:
       - LOG_LEVEL=info
       # Host machine LAN IP makes WebRTC reachable from other devices;
       # localhost entries cover browser access on the Docker host itself.
-      - WEBRTC_ADDITIONAL_HOSTS=${WEBRTC_ADDITIONAL_HOSTS:-10.160.45.134,localhost,127.0.0.1}
+      # IMPORTANT: set this to YOUR host machine's LAN IP (e.g. run
+      # `ipconfig` on Windows or `hostname -I` on Linux) or WebRTC ICE
+      # will fail from other devices (the dashboard then falls back to HLS).
+      - WEBRTC_ADDITIONAL_HOSTS=${WEBRTC_ADDITIONAL_HOSTS:-192.168.100.23,localhost,127.0.0.1}
       - STREAMS_CONFIG_PATH=/app/config/streams.json
       - TZ=${TZ:-Asia/Karachi}
       - RTSP_USERNAME=${RTSP_USERNAME:-admin}
