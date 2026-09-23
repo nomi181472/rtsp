@@ -6,8 +6,23 @@ services:
       dockerfile: Dockerfile
     container_name: mock-hikvision-rtsp
     restart: unless-stopped
-    # Host networking enables direct WebRTC UDP/TCP negotiation and multi-laptop LAN access
-    network_mode: host
+
+    # Explicit port mappings work on BOTH Windows (Docker Desktop) and Linux.
+    # Keep network_mode: host commented out on Windows — Docker Desktop does
+    # not support it reliably. Uncomment it on Linux only if you prefer host
+    # networking over published ports (then remove the ports: block below).
+    ports:
+      - "${RTSP_PORT:-8554}:${RTSP_PORT:-8554}"          # RTSP
+      - "${HLS_PORT:-8888}:${HLS_PORT:-8888}"            # HLS
+      - "${WEBRTC_PORT:-8889}:${WEBRTC_PORT:-8889}"      # WebRTC signaling
+      - "${WEB_PORT:-8080}:${WEB_PORT:-8080}"            # Web dashboard
+      - "${API_PORT:-9997}:${API_PORT:-9997}"            # MediaMTX REST API
+      - "8000:8000/udp"                                  # RTP media
+      - "8001:8001/udp"                                  # RTCP control
+      - "8189:8189/udp"                                  # WebRTC ICE (UDP)
+      - "8189:8189"                                      # WebRTC ICE (TCP)
+    # network_mode: host
+
     environment:
       - RTSP_PORT=8554
       - HLS_PORT=8888
@@ -15,6 +30,8 @@ services:
       - WEB_PORT=8080
       - API_PORT=9997
       - LOG_LEVEL=info
+      # Host machine LAN IP makes WebRTC reachable from other devices;
+      # localhost entries cover browser access on the Docker host itself.
       - WEBRTC_ADDITIONAL_HOSTS=${WEBRTC_ADDITIONAL_HOSTS:-10.160.45.134,localhost,127.0.0.1}
       - STREAMS_CONFIG_PATH=/app/config/streams.json
       - TZ=${TZ:-Asia/Karachi}
