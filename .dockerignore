@@ -1,0 +1,74 @@
+# ------------------------------------------------------------------
+# Docker build context exclusions.
+# Only these are COPYed into the image (see Dockerfile):
+#   bin/ app/ config/ videos/ web/
+# Everything else is stripped to keep the build context small and to
+# keep secrets / local artifacts out of the image layers.
+# ------------------------------------------------------------------
+
+# Version control & CI
+.git
+.gitignore
+.dockerignore
+.github
+.gitattributes
+
+# Secrets, local env files & certificates
+.env
+.env.*
+*.env
+*.crt
+*.key
+*.pem
+auto.crt
+auto.key
+
+# Python runtime artifacts
+__pycache__
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+*.egg-info/
+.venv/
+venv/
+env/
+ENV/
+
+# Docs & developer-only files (not needed at runtime)
+*.md
+LICENSE
+docs/
+
+# Compose / local tooling
+docker-compose.yml
+docker-compose.yaml
+test_client.py
+.gitlab-ci.yml
+Makefile
+
+# Editors, OS & IDE cruft
+.idea/
+.vscode/
+.DS_Store
+._*
+Thumbs.db
+*.swp
+*~
+*.log
+logs/
+*.pid
+
+# HLS segments & temporary streaming dumps (generated at runtime)
+*.ts
+*.m4s
+*.m3u8
+*.mpd
+recordings/
+test_output/
+snapshot_*.png
+
+# NOTE: videos/ and bin/ are intentionally NOT ignored.
+#   videos/ holds the CCTV sample footage the container streams.
+#   bin/mediamtx avoids re-downloading the binary on every build.
