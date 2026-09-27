@@ -39,12 +39,15 @@ services:
       # will fail from other devices (the dashboard then falls back to HLS).
       - WEBRTC_ADDITIONAL_HOSTS=${WEBRTC_ADDITIONAL_HOSTS:-192.168.100.23,localhost,127.0.0.1}
       - STREAMS_CONFIG_PATH=/app/config/streams.json
+      - AUTO_DISCOVER=${AUTO_DISCOVER:-true}
       - TZ=${TZ:-Asia/Karachi}
       - RTSP_USERNAME=${RTSP_USERNAME:-admin}
       - RTSP_PASSWORD=${RTSP_PASSWORD:-Password123}
     volumes:
-      # Mount configuration for live modifications
-      - ./config/streams.json:/app/config/streams.json:ro
+      # Mount configuration for live modifications.
+      # Must stay writable: on startup the server appends any newly dropped
+      # videos/ files as new channels to streams.json (see server.auto_discover).
+      - ./config/streams.json:/app/config/streams.json
       # Mount local video storage directory
       - ./videos:/app/videos
       # Mount web dashboard

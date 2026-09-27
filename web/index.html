@@ -626,8 +626,9 @@
   <div id="toast">Copied to clipboard!</div>
 
   <script>
-    // System Channel Definitions matching streams.json
-    const CHANNELS = [
+    // Offline fallback only. The live channel list is always fetched from
+    // /api/channels so newly added videos appear without editing this file.
+    const FALLBACK_CHANNELS = [
       {
         id: "101",
         name: "Front Entrance Camera",
@@ -658,9 +659,41 @@
     ];
 
     const host = window.location.hostname || "localhost";
-    const rtspPort = 8554;
-    const webrtcPort = 8889;
-    const hlsPort = 8888;
+    let CHANNELS = FALLBACK_CHANNELS;
+    let channelsReady = false;
+    let rtspPort = 8554;
+    let webrtcPort = 8889;
+    let hlsPort = 8888;
+
+    // Load the authoritative channel/port list from the server
+    async function loadChannels() {
+      try {
+        const res = await fetch("/api/channels", { cache: "no-store" });
+        if (!res.ok) throw new Error("HTTP " + res.status);
+        const data = await res.json();
+        if (!Array.isArray(data.channels) || data.channels.length === 0) {
+          throw new Error("empty channel list");
+        }
+        CHANNELS = data.channels.map((ch) => ({
+          id: String(ch.id),
+          name: ch.name || "Camera " + ch.id,
+          type: ch.type || "",
+          res: ch.res || "",
+          fps: ch.fps || "",
+          description: ch.description || "",
+          directPath: ch.direct_path || String(ch.id),
+          hikPath: ch.hik_path || "Streaming/Channels/" + ch.id,
+          legacyPath: ch.legacy_path || "ch" + ch.id + "/main/av_stream"
+        }));
+        if (data.rtsp_port) rtspPort = data.rtsp_port;
+        if (data.webrtc_port) webrtcPort = data.webrtc_port;
+        if (data.hls_port) hlsPort = data.hls_port;
+      } catch (err) {
+        console.warn("[CCTV] /api/channels unavailable, using built-in fallback list:", err);
+        CHANNELS = FALLBACK_CHANNELS;
+      }
+      channelsReady = true;
+    }
 
     // Active peer connections and HLS instances
     const activeStreams = {};
@@ -824,10 +857,11 @@
         card.className = "camera-card";
         card.id = `card-${ch.id}`;
 
-        const directRtsp = `rtsp://${userPrefix}${host}:${rtspPort}/${ch.id}`;
+        const streamPath = ch.directPath || ch.id;
+        const directRtsp = `rtsp://${userPrefix}${host}:${rtspPort}/${streamPath}`;
         const hikRtsp = `rtsp://${userPrefix}${host}:${rtspPort}/${ch.hikPath}`;
         const legacyRtsp = `rtsp://${userPrefix}${host}:${rtspPort}/${ch.legacyPath}`;
-        const webrtcWebUrl = `http://${host}:${webrtcPort}/${ch.id}/`;
+        const webrtcWebUrl = `http://${host}:${webrtcPort}/${streamPath}/`;
 
         card.innerHTML = `
           <div class="card-header">
@@ -900,13 +934,13 @@
         btnWebRTC.addEventListener("click", () => {
           btnWebRTC.classList.add("active");
           btnHLS.classList.remove("active");
-          startWebRTC(ch.id, videoEl, loaderEl, badgeEl);
+          startWebRTC(streamPath, videoEl, loaderEl, badgeEl);
         });
 
         btnHLS.addEventListener("click", () => {
           btnHLS.classList.add("active");
           btnWebRTC.classList.remove("active");
-          startHLS(ch.id, videoEl, loaderEl, badgeEl);
+          startHLS(streamPath, videoEl, loaderEl, badgeEl);
         });
 
         card.querySelector(`#btn-fs-${ch.id}`).addEventListener("click", () => {
@@ -931,7 +965,7 @@
         });
 
         // Start WebRTC by default
-        startWebRTC(ch.id, videoEl, loaderEl, badgeEl);
+        startWebRTC(streamPath, videoEl, loaderEl, badgeEl);
       });
     }
 
@@ -949,12 +983,16 @@
     });
 
     document.getElementById("reload-all-btn").addEventListener("click", () => {
+      if (!channelsReady) return;
       renderGrid();
       showToast("Reconnected all camera streams");
     });
 
     // Boot
-    window.addEventListener("DOMContentLoaded", renderGrid);
+    window.addEventListener("DOMContentLoaded", async () => {
+      await loadChannels();
+      renderGrid();
+    });
   </script>
 </body>
 </html>

@@ -7,6 +7,7 @@ hosts the multi-view CCTV web station, and runs the RTSP / WebRTC server.
 
 import json
 import os
+import re
 import shutil
 import signal
 import socket
@@ -16,9 +17,26 @@ import tempfile
 import threading
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Set, Tuple
 
 IS_WINDOWS = os.name == "nt"
+
+# Media files picked up by the videos/ auto-discovery scan.
+VIDEO_EXTENSIONS = (".mp4", ".mkv", ".avi", ".mov", ".m4v", ".webm", ".ts", ".flv")
+
+# Prefixes expanded into readable words when naming auto-discovered channels.
+CAMERA_NAME_TOKENS = {
+    "cam": "Camera",
+    "ch": "Channel",
+    "chan": "Channel",
+    "channel": "Channel",
+    "clip": "Clip",
+    "footage": "Footage",
+    "vid": "Video",
+    "video": "Video",
+}
+
+REMOTE_SOURCE_PREFIXES = ("http://", "https://", "rtsp://", "rtmp://", "srt://")
 
 
 def find_mediamtx_binary() -> str:
@@ -102,24 +120,63 @@ def get_additional_hosts() -> List[str]:
     return hosts
 
 
-def start_web_dashboard(web_dir: Path, port: int) -> Any:
+def build_channels_api_payload(
+    server_opts: Dict[str, Any], report: List[Dict[str, Any]]
+) -> Dict[str, Any]:
+    """Build the /api/channels payload so the dashboard never hardcodes channels."""
+    return {
+        "rtsp_port": server_opts["rtsp_port"],
+        "hls_port": server_opts["hls_port"],
+        "webrtc_port": server_opts["webrtc_port"],
+        "web_port": server_opts["web_port"],
+        "api_port": server_opts["api_port"],
+        "channels": [
+            {
+                "id": item["id"],
+                "name": item["name"],
+                "type": item["type"],
+                "source": item["source"],
+                "description": item.get("description", ""),
+                "live_timestamp": item["live_timestamp"],
+                "res": item.get("res", ""),
+                "fps": item.get("fps", ""),
+                "direct_path": item["direct_path"],
+                "hik_path": item["hik_path"],
+                "legacy_path": item["legacy_path"],
+            }
+            for item in report
+        ],
+    }
+
+
+def start_web_dashboard(web_dir: Path, port: int, api_payload: Optional[Dict[str, Any]] = None) -> Any:
     """Run lightweight HTTP server for CCTV Multi-View Web Dashboard."""
     if not web_dir.exists():
         print(f"[WARN] Web dashboard directory not found at: {web_dir}")
         return None
 
+    channels_json = json.dumps(api_payload or {"channels": []}).encode("utf-8")
+
     class QuietHTTPHandler(SimpleHTTPRequestHandler):
         def __init__(self, *args, **kwargs):
             super().__init__(*args, directory=str(web_dir), **kwargs)
 
+        def _send_json(self, body: bytes, status: int = 200) -> None:
+            self.send_response(status)
+            self.send_header("Content-Type", "application/json; charset=utf-8")
+            self.send_header("Content-Length", str(len(body)))
+            self.send_header("Cache-Control", "no-store")
+            self.end_headers()
+            self.wfile.write(body)
+
         def do_GET(self):
+            if self.path.split("?", 1)[0].rstrip("/") == "/api/channels":
+                self._send_json(channels_json)
+                return
             if self.path.startswith("/api/delay"):
                 import time
                 time.sleep(3.5)
-                self.send_response(200)
-                self.send_header("Content-Type", "image/png")
-                self.send_header("Content-Length", "0")
-                self.end_headers()
+                self._send_json(b"", 200)
                 return
             super().do_GET()
 
@@ -137,7 +194,193 @@ def start_web_dashboard(web_dir: Path, port: int) -> Any:
         return None
 
 
-def load_streams_config(config_path: Path) -> Tuple[Dict[str, Any], List[Dict[str, Any]]]:
+def coerce_bool(value: Any, default: bool) -> bool:
+    """Parse a boolean that may arrive as a real bool, a number, or a string."""
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, (int, float)):
+        return value != 0
+    if isinstance(value, str):
+        text = value.strip().lower()
+        if text in ("true", "1", "yes", "on"):
+            return True
+        if text in ("false", "0", "no", "off"):
+            return False
+    return default
+
+
+def resolve_local_path(source: str, base_dir: Path) -> Optional[Path]:
+    """Return the absolute path of a local source, or None for remote URLs."""
+    if not source or source.lower().startswith(REMOTE_SOURCE_PREFIXES):
+        return None
+    path = Path(source)
+    if not path.is_absolute():
+        path = (base_dir / path).resolve()
+    return path
+
+
+def prettify_channel_name(stem: str) -> str:
+    """Turn a video filename stem into a readable camera name (cam909 -> Camera 909)."""
+    trailing = re.search(r"(\d+)$", stem)
+    digits = trailing.group(1) if trailing else ""
+    base = stem[: len(stem) - len(digits)] if digits else stem
+
+    words = [w for w in re.split(r"[^0-9A-Za-z]+", base) if w]
+    label = " ".join(CAMERA_NAME_TOKENS.get(w.lower(), w.capitalize()) for w in words)
+
+    if digits:
+        return f"{label} {digits}".strip()
+    return label or "Camera"
+
+
+def allocate_next_channel_id(used_ids: Set[str]) -> str:
+    """Return the next free Hikvision-style channel ID (101, 202, 303, ...)."""
+    for n in range(1, 10):
+        candidate = f"{n}{n:02d}"
+        if candidate not in used_ids:
+            return candidate
+    return str(1000 + len(used_ids))
+
+
+def discover_video_channels(
+    base_dir: Path,
+    existing_channels: List[Dict[str, Any]],
+    videos_dir: Optional[Path] = None,
+) -> List[Dict[str, Any]]:
+    """Scan the videos directory and build channels for files not yet configured."""
+    vdir = Path(videos_dir) if videos_dir else (base_dir / "videos")
+    if not vdir.is_dir():
+        return []
+
+    used_ids = {str(ch["id"]) for ch in existing_channels}
+    referenced: Set[Path] = set()
+    for ch in existing_channels:
+        local = resolve_local_path(ch.get("source", ""), base_dir)
+        if local is not None:
+            referenced.add(local)
+
+    media_files = sorted(
+        (p for p in vdir.iterdir() if p.is_file() and p.suffix.lower() in VIDEO_EXTENSIONS),
+        key=lambda p: p.name.lower(),
+    )
+    unclaimed = [p for p in media_files if p.resolve() not in referenced]
+
+    # Two passes so that filename-derived IDs always win: cam101.mp4 must claim
+    # 101 before a digit-less blur_car.mp4 is handed the next free ID.
+    with_digits = [p for p in unclaimed if re.search(r"(\d+)", p.stem)]
+    without_digits = [p for p in unclaimed if not re.search(r"(\d+)", p.stem)]
+
+    discovered: List[Dict[str, Any]] = []
+    for media in with_digits:
+        ch_id = re.search(r"(\d+)", media.stem).group(1)
+        if ch_id in used_ids:
+            print(
+                f"[WARN] Skipping {media.name}: channel ID {ch_id} is already used "
+                f"by another source. Rename the file or free that ID."
+            )
+            continue
+        used_ids.add(ch_id)
+        discovered.append(_build_discovered_channel(media, ch_id))
+
+    for media in without_digits:
+        ch_id = allocate_next_channel_id(used_ids)
+        used_ids.add(ch_id)
+        discovered.append(_build_discovered_channel(media, ch_id))
+
+    return discovered
+
+
+def _build_discovered_channel(media: Path, ch_id: str) -> Dict[str, Any]:
+    """Create a channel definition for an auto-discovered video file."""
+    print(f"[AUTO] Discovered videos/{media.name} -> channel {ch_id}")
+    return {
+        "id": ch_id,
+        "name": prettify_channel_name(media.stem),
+        "source": f"./videos/{media.name}",
+        "description": "Auto-discovered local video file",
+    }
+
+
+def persist_discovered_channels(config_path: Path, new_channels: List[Dict[str, Any]]) -> bool:
+    """Append auto-discovered channels back into streams.json (best effort, atomic)."""
+    if not new_channels:
+        return False
+
+    tmp_path = config_path.with_name(config_path.name + ".tmp")
+    try:
+        with open(config_path, "r", encoding="utf-8") as f:
+            doc = json.load(f)
+
+        if not isinstance(doc, dict) or not isinstance(doc.get("channels"), list):
+            print("[WARN] streams.json has no 'channels' array; not persisting discovered channels.")
+            return False
+
+        for ch in new_channels:
+            doc["channels"].append({k: ch[k] for k in ("id", "name", "source", "description")})
+
+        with open(tmp_path, "w", encoding="utf-8") as f:
+            json.dump(doc, f, indent=2, ensure_ascii=False)
+            f.write("\n")
+        os.replace(tmp_path, config_path)
+
+        print(f"[AUTO] Persisted {len(new_channels)} new channel(s) to {config_path}")
+        return True
+    except Exception as e:
+        print(f"[WARN] Could not persist discovered channels to {config_path}: {e}")
+        print("[WARN] Continuing with in-memory channels only (is the mount read-only?).")
+        try:
+            if tmp_path.exists():
+                tmp_path.unlink()
+        except Exception:
+            pass
+        return False
+
+
+def probe_video_meta(path: str) -> Dict[str, str]:
+    """Best-effort resolution/fps probe for dashboard display only."""
+    if not shutil.which("ffprobe"):
+        return {}
+    try:
+        result = subprocess.run(
+            [
+                "ffprobe", "-v", "error",
+                "-select_streams", "v:0",
+                "-show_entries", "stream=width,height,avg_frame_rate",
+                "-of", "json", path,
+            ],
+            capture_output=True,
+            text=True,
+            timeout=15,
+        )
+        if result.returncode != 0:
+            return {}
+        streams = json.loads(result.stdout or "{}").get("streams") or []
+        stream = streams[0] if streams else {}
+    except Exception:
+        return {}
+
+    meta: Dict[str, str] = {}
+    width, height = stream.get("width"), stream.get("height")
+    if width and height:
+        # Standard labels are based on the short edge: 1920x1080 -> 1080p.
+        meta["res"] = f"{height}p" if width >= height else f"{width}p"
+
+    frame_rate = stream.get("avg_frame_rate") or ""
+    try:
+        num, den = (int(part) for part in frame_rate.split("/"))
+        if num > 0 and den > 0:
+            meta["fps"] = f"{round(num / den)} FPS"
+    except Exception:
+        pass
+
+    return meta
+
+
+def load_streams_config(
+    config_path: Path,
+    base_dir: Path,
+    apply_discovery: bool = True,
+) -> Tuple[Dict[str, Any], List[Dict[str, Any]]]:
     """Parse streams.json supporting multiple flexible schema variants."""
     if not config_path.exists():
         raise FileNotFoundError(f"Configuration file not found at: {config_path}")
@@ -152,9 +395,11 @@ def load_streams_config(config_path: Path) -> Tuple[Dict[str, Any], List[Dict[st
         "web_port": int(os.environ.get("WEB_PORT", 8080)),
         "api_port": int(os.environ.get("API_PORT", 9997)),
         "log_level": os.environ.get("LOG_LEVEL", "info"),
-        "live_timestamp": os.environ.get("LIVE_TIMESTAMP", "true").lower() in ("true", "1", "yes"),
+        "live_timestamp": coerce_bool(os.environ.get("LIVE_TIMESTAMP", "true"), True),
         "username": os.environ.get("RTSP_USERNAME", "admin"),
         "password": os.environ.get("RTSP_PASSWORD", "Password123"),
+        "auto_discover": coerce_bool(os.environ.get("AUTO_DISCOVER", "true"), True),
+        "videos_dir": os.environ.get("VIDEOS_DIR", ""),
     }
     channels: List[Dict[str, Any]] = []
 
@@ -163,7 +408,7 @@ def load_streams_config(config_path: Path) -> Tuple[Dict[str, Any], List[Dict[st
             for k, v in raw["server"].items():
                 if k in server_opts and v is not None:
                     if isinstance(server_opts[k], bool):
-                        server_opts[k] = bool(v)
+                        server_opts[k] = coerce_bool(v, server_opts[k])
                     else:
                         server_opts[k] = type(server_opts[k])(v)
 
@@ -220,13 +465,20 @@ def load_streams_config(config_path: Path) -> Tuple[Dict[str, Any], List[Dict[st
                     "live_timestamp": ch.get("live_timestamp", server_opts["live_timestamp"]),
                 })
 
+    if apply_discovery and server_opts.get("auto_discover", True):
+        videos_dir = Path(server_opts["videos_dir"]) if server_opts.get("videos_dir") else None
+        discovered = discover_video_channels(base_dir, channels, videos_dir)
+        if discovered:
+            channels.extend(discovered)
+            persist_discovered_channels(config_path, discovered)
+            server_opts["_discovery_applied"] = True
+
     return server_opts, channels
 
 
 def resolve_source(source: str, base_dir: Path) -> Tuple[str, str]:
     """Determine if source is a remote CDN/object URL or local file path."""
-    s_lower = source.lower()
-    if s_lower.startswith(("http://", "https://", "rtsp://", "rtmp://", "srt://")):
+    if source.lower().startswith(REMOTE_SOURCE_PREFIXES):
         return source, "Remote CDN / Object URL"
 
     p = Path(source)
@@ -396,12 +648,20 @@ def build_mediamtx_yaml(server_opts: Dict[str, Any], channels: List[Dict[str, An
             '',
         ])
 
+        meta = probe_video_meta(resolved_src) if src_type == "Local Video File" else {}
+
         report.append({
             "id": ch_id,
             "name": ch_name,
             "type": src_type,
             "source": resolved_src,
+            "description": ch.get("description", ""),
             "live_timestamp": "ACTIVE (Continuous Real-Time Clock, Never Repeats)" if use_timestamp else "OFF (Stream Copy)",
+            "res": meta.get("res", ""),
+            "fps": meta.get("fps", ""),
+            "direct_path": direct_path,
+            "hik_path": hik_path,
+            "legacy_path": legacy_path,
             "direct_url": f"rtsp://{user_prefix}<host>:{rtsp_port}/{direct_path}",
             "hikvision_url": f"rtsp://{user_prefix}<host>:{rtsp_port}/{hik_path}",
             "legacy_url": f"rtsp://{user_prefix}<host>:{rtsp_port}/{legacy_path}",
@@ -439,6 +699,8 @@ def print_banner(server_opts: Dict[str, Any], report: List[Dict[str, str]]):
     print(f" WebRTC Player  : http://localhost:{webrtc_port}/<channel>/ (Ultra-Low Latency WHEP)")
     print(f" WebRTC ICE Port: 8189 (UDP & TCP)")
     print(f" HLS Player     : http://localhost:{hls_port}/<channel>/")
+    print(f" Auto Discovery : {'ON' if server_opts.get('auto_discover', True) else 'OFF'}"
+          f"{' (+new channels added to streams.json)' if server_opts.get('_discovery_applied') else ''}")
     print(f" Channels       : {len(report)} active")
     print("-" * 80)
 
@@ -467,7 +729,7 @@ def main():
             config_file = alt_config
 
     print(f"[INIT] Loading CCTV streams configuration from: {config_file}")
-    server_opts, channels = load_streams_config(config_file)
+    server_opts, channels = load_streams_config(config_file, base_dir)
 
     if not channels:
         print("[ERROR] No channels defined in configuration! Exiting.")
@@ -484,7 +746,7 @@ def main():
     web_dir = base_dir / "web"
     if not web_dir.exists():
         web_dir = Path("/app/web")
-    httpd = start_web_dashboard(web_dir, server_opts["web_port"])
+    httpd = start_web_dashboard(web_dir, server_opts["web_port"], build_channels_api_payload(server_opts, report))
 
     print_banner(server_opts, report)
 

@@ -205,6 +205,7 @@ Configure your server and channels in [`config/streams.json`](config/streams.jso
     "api_port": 9997,
     "log_level": "info",
     "live_timestamp": true,
+    "auto_discover": true,
     "username": "admin",
     "password": "Password123"
   },
@@ -235,8 +236,23 @@ Configure your server and channels in [`config/streams.json`](config/streams.jso
 ```
 
 ### Adding New Cameras
-- **Local Video**: Place any `.mp4` / `.mkv` / `.avi` file in `./videos/` and set `"source": "./videos/my_video.mp4"`.
-- **Remote CDN / Cloud S3**: Set `"source": "https://s3.amazonaws.com/my-bucket/cctv.mp4"`.
+
+The easiest option is to **just drop a video file into `./videos/`** and restart the container. Auto-discovery scans that directory and appends a channel for any file not already referenced in `config/streams.json`:
+
+```bash
+cp my_clip.mp4 videos/          # -> channel 505, name "My Clip", written into streams.json
+docker compose restart
+```
+
+- **Channel IDs**: taken from digits in the filename (`cam909.mp4` -> `909`). Files without digits get the next free Hikvision-style ID (`101, 202, 303, 404, 505, ...`). If the filename digits collide with an existing channel (e.g. `cam202.mp4` while channel `202` already exists), the file is skipped with a warning so the `camNNN = channel NNN` convention stays intact — rename the file or free up that ID.
+- **Persistence**: discovered channels are written back into `config/streams.json`, so that file must be writable (the bundled `docker-compose.yml` already mounts it read-write). If it is read-only, the server logs a warning and uses the channels in memory for that run only. Because `streams.json` is a tracked file, auto-discovery will show up in `git status` — commit or ignore it as you prefer.
+- **Dashboard**: the web station reads its camera list from `GET /api/channels`, so newly added channels appear automatically without editing `web/index.html`.
+- **Turning it off**: set `"auto_discover": false` in the `server` block of `config/streams.json`, or the `AUTO_DISCOVER=false` environment variable.
+
+To configure a channel explicitly instead, add it to `config/streams.json` by hand — explicitly configured channels always win over auto-discovery and are never duplicated:
+
+- **Local Video**: set `"source": "./videos/my_video.mp4"`.
+- **Remote CDN / Cloud S3**: set `"source": "https://s3.amazonaws.com/my-bucket/cctv.mp4"`.
 
 ---
 
