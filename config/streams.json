@@ -27,6 +27,12 @@
       "name": "Office Lobby Camera",
       "source": "./videos/cam303.mp4",
       "description": "Secondary local CCTV camera stream"
+    },
+    {
+      "id": "404",
+      "name": "Parking Lot Camera blur",
+      "source": "./videos/blur_car.mp4",
+      "description": "blur car "
     }
   ]
 }
